@@ -9,8 +9,17 @@
 // And whatever it claims about its own rigour, we stamp the result `estimated`,
 // because nobody on our side checked the table.
 
+import { getStore } from '@netlify/blobs'
+
 const XAI_URL = 'https://api.x.ai/v1/responses'
 const MODEL = process.env.XAI_MODEL || 'grok-4.5'
+
+// This runs on a prepaid credit with no card behind it, and web search is
+// billed on top of tokens. So: every answer is cached forever and shared by
+// everyone, and there is a hard monthly ceiling on new lookups. When either
+// the ceiling or the credit runs out the site falls back to the built-in
+// library rather than breaking.
+const MONTHLY_CAP = Number(process.env.RESOLVE_MONTHLY_CAP || 400)
 
 const ALLOWED_ORIGINS = [
   'https://off-plate.github.io',
@@ -138,6 +147,23 @@ export default async (req) => {
     return json({ error: 'rate limited', message: 'Too many questions at once. Give it a minute.' }, 429, cors)
   }
 
+  // Everyone shares one cache, so a question is only ever paid for once.
+  const cacheKey = keyFor(question)
+  const hit = await cacheGet(cacheKey)
+  if (hit) return json({ ...hit, cached: true }, 200, cors)
+
+  const spent = await monthlyCount()
+  if (spent >= MONTHLY_CAP) {
+    return json(
+      {
+        error: 'budget',
+        message: `This month's web lookups are used up (${MONTHLY_CAP}). Anything already asked still works, and so does everything in the library.`,
+      },
+      429,
+      cors,
+    )
+  }
+
   let upstream
   try {
     upstream = await fetch(XAI_URL, {
@@ -164,12 +190,26 @@ export default async (req) => {
     return json({ error: 'upstream unreachable', message: String(e).slice(0, 200) }, 502, cors)
   }
 
+  // A prepaid balance with no card behind it 403s when it is empty. That is a
+  // sentence a person can act on, not a stack trace.
+  if (upstream.status === 403 || upstream.status === 402) {
+    return json(
+      {
+        error: 'out of credit',
+        message: 'The Grok credit behind this has run out. The built-in measures still work.',
+      },
+      402,
+      cors,
+    )
+  }
   if (!upstream.ok) {
     const detail = (await upstream.text()).slice(0, 400)
     return json({ error: 'upstream error', status: upstream.status, message: detail }, 502, cors)
   }
 
   const data = await upstream.json()
+  await bumpMonthlyCount()
+
   const parsed = readPayload(data)
   if (!parsed) return json({ error: 'unreadable', message: 'Grok did not return usable JSON.' }, 502, cors)
 
@@ -178,7 +218,71 @@ export default async (req) => {
     return json({ understood: false, reason: parsed.reason || 'The answer did not hold together.' }, 200, cors)
   }
 
-  return json({ ...clean, citations: citationsOf(data) }, 200, cors)
+  const answer = { ...clean, citations: citationsOf(data) }
+  await cacheSet(cacheKey, answer)
+  return json(answer, 200, cors)
+}
+
+// --- shared cache and budget ------------------------------------------------
+// All of it is best effort. If Blobs is not available the site still answers,
+// it just pays for repeat questions.
+
+function keyFor(q) {
+  return q
+    .toLowerCase()
+    .replace(/[^a-z0-9\s.:/']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180)
+}
+
+function store(name) {
+  try {
+    return getStore(name)
+  } catch {
+    return null
+  }
+}
+
+async function cacheGet(key) {
+  try {
+    const raw = await store('aia-answers')?.get(key)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+async function cacheSet(key, value) {
+  try {
+    await store('aia-answers')?.set(key, JSON.stringify(value))
+  } catch {
+    /* not fatal */
+  }
+}
+
+function monthKey() {
+  const d = new Date()
+  return `calls-${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+async function monthlyCount() {
+  try {
+    return Number((await store('aia-meta')?.get(monthKey())) || 0)
+  } catch {
+    return 0
+  }
+}
+
+async function bumpMonthlyCount() {
+  try {
+    const s = store('aia-meta')
+    if (!s) return
+    const n = Number((await s.get(monthKey())) || 0) + 1
+    await s.set(monthKey(), String(n))
+  } catch {
+    /* not fatal */
+  }
 }
 
 /** The Responses API can put the text in a few places depending on tool use. */

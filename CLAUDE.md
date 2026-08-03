@@ -104,6 +104,24 @@ VITE_RESOLVER="http://localhost:8788" npm run build && npm run preview
 The key lives only in the Netlify env as `XAI_API_KEY`, never in the repo and never in the
 bundle. `XAI_MODEL` overrides the model, default `grok-4.5`.
 
+## Money
+
+This runs on a prepaid xAI credit with **no card behind it**. xAI defaults to a $0 invoiced
+limit, so when the credit is gone the API returns 403 and the site falls back to the library.
+It cannot generate a bill. **Do not add a payment method or raise the invoiced limit.**
+
+Web search is billed per call on top of tokens, so a new question costs roughly one to two
+cents. Three things keep that in check, and all three must stay:
+
+1. **The library answers first.** Every question it covers costs nothing.
+2. **`aia-answers` in Netlify Blobs caches every answer forever, shared by all visitors.** A
+   question is paid for once, ever. The browser has its own 30-day cache in front of that.
+3. **`RESOLVE_MONTHLY_CAP`, default 400 new lookups a month**, counted in Blobs. Past the cap
+   the site says so plainly and keeps working on the library.
+
+If cost ever becomes a problem the first move is promoting the most-asked cached answers into
+`src/data/metrics.ts` as properly sourced metrics, not turning off the cache.
+
 `npm run test` checks that twenty real sentences parse to the right metric and value, that
 every metric parses its own examples, and that no distribution is non-monotonic. Add a case to
 `scripts/check.ts` whenever you add a metric or touch the parser.

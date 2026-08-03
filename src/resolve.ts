@@ -9,8 +9,18 @@ import type { Metric, Segment } from './data/metrics'
 import type { Reading } from './parse'
 import type { Dist } from './stats'
 
+/** Where the site actually lives. The GitHub Pages copy is kept working too. */
+const NETLIFY_ORIGIN = 'https://am-i-average.netlify.app'
+
+/**
+ * Served from Netlify: call the function next door, same origin, no preflight.
+ * Served from GitHub Pages or a file: reach across to Netlify, which allows it.
+ */
 export const ENDPOINT =
-  (import.meta.env.VITE_RESOLVER as string | undefined) ?? 'https://am-i-average.netlify.app/api/resolve'
+  (import.meta.env.VITE_RESOLVER as string | undefined) ??
+  (typeof location !== 'undefined' && location.hostname.endsWith('.netlify.app')
+    ? '/api/resolve'
+    : `${NETLIFY_ORIGIN}/api/resolve`)
 
 export interface Citation {
   url: string
@@ -73,8 +83,16 @@ export async function resolveRemote(question: string): Promise<ResolveResult> {
     if (res.status === 503) {
       return { ok: false, reason: 'The web search is not switched on for this deploy yet.', retryable: false }
     }
+    if (res.status === 402) {
+      return { ok: false, reason: body?.message ?? 'The search credit has run out.', retryable: false }
+    }
     if (res.status === 429) {
-      return { ok: false, reason: body?.message ?? 'Too many questions at once. Give it a minute.', retryable: true }
+      const budget = body?.error === 'budget'
+      return {
+        ok: false,
+        reason: body?.message ?? 'Too many questions at once. Give it a minute.',
+        retryable: !budget,
+      }
     }
     return { ok: false, reason: body?.message ?? 'The search failed.', retryable: true }
   }
