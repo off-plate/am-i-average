@@ -6,6 +6,7 @@ import { distFor, METRICS, BY_ID } from './data/metrics'
 import type { Metric } from './data/metrics'
 import { bandFor, CONFIDENCE_TEXT, rankSentence, rarityLine, verdictLine } from './verdicts'
 import { injectFigure, pictogram } from './ui/pictogram'
+import { resolveRemote } from './resolve'
 
 const EXAMPLES = [
   'I run 1 km in 4 minutes',
@@ -40,7 +41,7 @@ injectFigure()
 
 const sourceCount = new Set(METRICS.map((m) => m.source.name)).size
 document.querySelector<HTMLElement>('#count')!.textContent =
-  `${METRICS.length} measures, ${sourceCount} public datasets`
+  `${METRICS.length} measures, ${sourceCount} public datasets, then the open web`
 
 chips.innerHTML = EXAMPLES.map(
   (e) => `<button type="button" class="chip" data-q="${attr(e)}">${esc(e)}</button>`,
@@ -83,6 +84,11 @@ results.addEventListener('click', (e) => {
     }
     return
   }
+  const web = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-web], [data-retry]')
+  if (web) {
+    void ask(web.dataset.web ?? web.dataset.retry ?? '', true)
+    return
+  }
   const drop = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-drop]')
   if (drop) {
     const id = Number(drop.dataset.drop)
@@ -93,15 +99,31 @@ results.addEventListener('click', (e) => {
   }
 })
 
-function ask(raw: string): void {
+async function ask(raw: string, force = false): Promise<void> {
   const sentence = raw.trim()
   if (!sentence) return
-  const result = parse(sentence)
+  const result = force ? { readings: [], unmatched: [] } : parse(sentence)
 
+  // Nothing in the library covers it, so go and look it up.
   if (result.readings.length === 0) {
-    results.insertAdjacentHTML('afterbegin', missCard(sentence, result.unmatched.length > 0))
+    const pendingId = nextId++
+    results.insertAdjacentHTML('afterbegin', pendingCard(pendingId, sentence))
     input.select()
     reveal()
+
+    const found = await resolveRemote(sentence)
+    const el = document.getElementById(`card-${pendingId}`)
+    if (!el) return
+
+    if (found.ok) {
+      const answer = toAnswer(found.reading, sentence)
+      answer.id = pendingId
+      answers.unshift(answer)
+      el.outerHTML = card(answer)
+      renderTally()
+    } else {
+      el.outerHTML = missCard(sentence, found.reason, found.retryable)
+    }
     return
   }
 
@@ -173,10 +195,21 @@ function card(a: Answer): string {
 
   <footer class="card__foot">
     <p class="stamp">
-      <a href="${attr(metric.source.url)}" target="_blank" rel="noopener">${esc(metric.source.name)}</a>
+      ${
+        metric.source.url
+          ? `<a href="${attr(metric.source.url)}" target="_blank" rel="noopener">${esc(metric.source.name)}</a>`
+          : `<span class="nosource">${esc(metric.source.name)}</span>`
+      }
       <span class="dot">/</span>${esc(metric.source.note)}
       <span class="dot">/</span><span class="conf conf--${metric.source.confidence}">${esc(metric.source.confidence)}</span>,
       ${esc(CONFIDENCE_TEXT[metric.source.confidence] ?? '')}
+      ${
+        metric.source.citations?.length
+          ? `<span class="cites">Read: ${metric.source.citations
+              .map((c) => `<a href="${attr(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a>`)
+              .join(', ')}</span>`
+          : ''
+      }
     </p>
     ${metric.caveat ? `<p class="caveat">${esc(metric.caveat)}</p>` : ''}
     ${a.reading.weak ? `<p class="caveat">Read as ${esc(metric.label)} from the units alone, with nothing in the sentence to confirm it.</p>` : ''}
@@ -198,6 +231,11 @@ function card(a: Answer): string {
               .join('')}</p>`
           : ''
       }
+      ${
+        metric.source.confidence === 'estimated'
+          ? ''
+          : `<p class="control"><button type="button" data-web="${attr(a.input)}">Ask the web instead</button></p>`
+      }
       <button type="button" class="drop" data-drop="${a.id}">Remove</button>
     </div>
   </footer>
@@ -216,7 +254,20 @@ function otherSegments(a: Answer) {
   return [...sameCountry, ...rest].slice(0, 3)
 }
 
-function missCard(sentence: string, hadNumber: boolean): string {
+function pendingCard(id: number, sentence: string): string {
+  return `
+<article class="card card--pending" id="card-${id}">
+  <div class="card__lead">
+    <h2 class="card__what">${esc(cap(sentence))}</h2>
+    <p class="verdict">Nothing in the library measures that. Reading the web for a distribution.</p>
+  </div>
+  <div class="card__chart">
+    ${pictogram({ you: 0, label: 'Searching' })}
+  </div>
+</article>`
+}
+
+function missCard(sentence: string, reason: string, retryable: boolean): string {
   const suggestions = METRICS.filter((m) => m.examples?.length)
     .slice(0, 6)
     .map((m) => `<button type="button" class="chip" data-q="${attr(m.examples![0])}">${esc(m.examples![0])}</button>`)
@@ -225,14 +276,16 @@ function missCard(sentence: string, hadNumber: boolean): string {
 <article class="card card--miss">
   <div class="card__lead">
     <h2 class="card__what">No idea, sorry</h2>
-    <p class="verdict">${
-      hadNumber
-        ? `There is a number in ${esc(quote(sentence))} but nothing in the library measures it yet.`
-        : `${esc(quote(sentence))} has no number in it. Give it one.`
-    }</p>
+    <p class="verdict">${esc(reason)}</p>
+    ${
+      retryable
+        ? `<p class="control"><button type="button" data-retry="${attr(sentence)}">Try again</button></p>`
+        : ''
+    }
   </div>
   <div class="card__chart">
-    <p class="rank">The library covers ${METRICS.length} things so far. These all work:</p>
+    <p class="rank">${esc(quote(sentence))}</p>
+    <p class="rarity">These all work without leaving the browser:</p>
     <div class="chips">${suggestions}</div>
   </div>
 </article>`

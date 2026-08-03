@@ -107,4 +107,31 @@ for (const m of METRICS) {
 }
 
 console.log(fails === 0 ? `\nall ${CASES.length} sentences + ${METRICS.length} metrics pass` : `\n${fails} failures`)
-process.exit(fails === 0 ? 0 : 1)
+
+// Regression: a units-only match must not answer when several metrics could
+// claim the number. "I practice guitar 5 hours a week" once came back as
+// "Running a half marathon in 5:00:00".
+const MUST_MISS = [
+  'I practice guitar 5 hours a week',
+  'I practise piano 2 hours a day',
+  'I meditate 20 minutes a day',
+  'I spend 3 hours a week gaming',
+]
+let missFails = 0
+for (const q of MUST_MISS) {
+  const r = parse(q)
+  if (r.readings.length > 0) {
+    missFails++
+    console.log(`FAIL  "${q}" should miss locally, got ${r.readings[0].metric.id}`)
+  }
+}
+// ...but an unambiguous unit still answers without a round trip.
+for (const q of ["I'm 6 foot 2", 'I am 183 cm']) {
+  const r = parse(q)
+  if (r.readings[0]?.metric.id !== 'height') {
+    missFails++
+    console.log(`FAIL  "${q}" should still resolve locally to height`)
+  }
+}
+console.log(missFails === 0 ? 'ambiguity guard holds' : `${missFails} ambiguity failures`)
+process.exit(fails === 0 && missFails === 0 ? 0 : 1)

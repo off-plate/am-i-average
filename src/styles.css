@@ -428,8 +428,45 @@ h1 {
   font-weight: 700;
   color: var(--ink);
 }
-.conf--modelled {
+.conf--modelled,
+.conf--estimated {
   color: var(--accent);
+}
+
+.nosource {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.cites {
+  display: block;
+  margin-top: 3px;
+}
+
+/* --- waiting on the web ---------------------------------------------------- */
+
+.card--pending .verdict {
+  color: var(--accent);
+}
+.card--pending .fig {
+  animation: searching 1400ms var(--ease-out) infinite both;
+  animation-delay: calc(var(--i) * 9ms);
+}
+
+@keyframes searching {
+  0%,
+  100% {
+    fill: var(--fig-above);
+  }
+  50% {
+    fill: var(--fig-below);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--pending .fig {
+    animation: none;
+  }
 }
 
 .caveat {

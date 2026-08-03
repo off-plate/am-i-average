@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = "docs"
+  functions = "netlify/functions"
+
+# The GitHub Pages copy calls this same function cross origin, so both
+# deployments behave identically. The allowlist lives in the function.
+[functions]
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

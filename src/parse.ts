@@ -181,7 +181,15 @@ export function parse(input: string): ParseResult {
     candidates.sort((a, b) => Math.abs(a.q.start - anchor) - Math.abs(b.q.start - anchor))
     const best = candidates[0]
 
-    if (s.wordScore === 0 && readings.length > 0) continue
+    // A match on units alone is only allowed when it is the ONLY metric that
+    // could take that number. "5 hours a week" fits a half marathon, sleep,
+    // screen time and exercise, so guessing produces a confident wrong answer;
+    // it is far better to admit the miss and let the web fallback take it.
+    // "183 cm" fits nothing but height, so that one still answers instantly.
+    if (s.wordScore === 0) {
+      if (readings.length > 0) continue
+      if (countAccepting(best.q) !== 1) continue
+    }
 
     const segment = segmentFor(s.metric, ctx)
     readings.push({
@@ -214,6 +222,16 @@ export function parse(input: string): ParseResult {
     ctx,
     unmatched: quantities.filter((q) => !usedQuantities.has(q)),
   }
+}
+
+/** How many metrics in the whole library would accept this number as their own. */
+function countAccepting(q: Quantity): number {
+  let n = 0
+  for (const m of METRICS) {
+    const v = toCanonical(m, q)
+    if (v !== null && inRange(m, v)) n++
+  }
+  return n
 }
 
 function keywordPosition(text: string, metric: Metric): number {

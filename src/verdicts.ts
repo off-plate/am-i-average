@@ -124,4 +124,5 @@ export const CONFIDENCE_TEXT: Record<string, string> = {
   measured: 'the source publishes these percentiles',
   fitted: 'fitted to published anchor points',
   modelled: 'one published average, spread assumed',
+  estimated: 'found by live web search, not checked by hand',
 }

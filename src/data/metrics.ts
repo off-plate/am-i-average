@@ -7,6 +7,9 @@
 //   measured  the source publishes the percentiles; we interpolate between them
 //   fitted    fitted to two or more published anchors
 //   modelled  one published anchor plus an assumed spread. Treat as a party trick.
+//   estimated came back from a live web search rather than this file. Nobody on
+//             our side checked the table, so it is always stamped this way no
+//             matter how good the source it found looks. See src/resolve.ts.
 
 import type { Dist } from '../stats'
 import { fitLognormal } from '../stats'
@@ -14,7 +17,7 @@ import { fmtDuration, fmtMoney, fmtNumber } from '../units'
 import type { Currency, Period, UnitKind } from '../units'
 import * as T from './tables'
 
-export type Confidence = 'measured' | 'fitted' | 'modelled'
+export type Confidence = 'measured' | 'fitted' | 'modelled' | 'estimated'
 export type Sex = 'm' | 'f'
 
 export interface Source {
@@ -23,6 +26,8 @@ export interface Source {
   /** What the number is and how it was turned into a distribution. */
   note: string
   confidence: Confidence
+  /** Pages a live search actually read. Only ever set on `estimated` answers. */
+  citations?: { url: string; title: string }[]
 }
 
 export interface Ctx {
@@ -522,7 +527,10 @@ export const METRICS: Metric[] = [
     direction: 'high',
     accepts: ['duration'],
     canonical: { unit: 'hours/week', per: 'week' },
-    keys: ['train', 'training', 'exercise', 'workout', 'work out', 'gym', 'practice', 'practise', 'play', 'sport', 'basketball', 'football', 'soccer', 'tennis', 'swim', 'cycling', 'climbing', 'boxing', 'yoga'],
+    // No bare "practice" or "play": those belong to guitar, chess and piano just
+    // as much as to sport, and the web search answers those far better than a
+    // generic exercise curve would.
+    keys: ['train', 'training', 'exercise', 'workout', 'work out', 'gym', 'sport', 'basketball', 'football', 'soccer', 'tennis', 'swim', 'cycling', 'climbing', 'boxing', 'yoga', 'running', 'lifting'],
     range: [600, 360000],
     segments: [
       {

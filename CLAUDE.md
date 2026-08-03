@@ -3,7 +3,7 @@
 **WHAT** A one-input toy: type a sentence with a number in it, get told how average you are.
 **WHO** Anyone who has ever wondered where they sit. Shareable, no signup, no account.
 **WHY** Every percentile site answers "where do I rank". None answers "how ordinary am I", which is the funnier question.
-**MUST** Real cited data on every card. No AI at runtime. No backend. Under 200KB. Works offline after first load.
+**MUST** Real cited data on every card. The library answers in the browser; only a miss goes to the web. Under 200KB.
 **DONE** A stranger types a sentence, gets a believable answer in under a second, and can see where the number came from.
 **ASK** Before adding a metric with no published source, before adding a second accent colour, before adding a framework.
 
@@ -43,10 +43,36 @@ src/ui/pictogram.ts the 100 figures
 src/main.ts         render
 ```
 
-**No AI at runtime, ever.** The parser is keyword scoring and unit matching. That is a
-feature, not a limitation: it answers instantly, costs nothing, works offline, and can always
-explain why it read a sentence the way it did. If it fails to understand something, widen the
-keyword list or add a unit rule. Do not reach for a model.
+```
+src/resolve.ts             the web fallback, client side
+netlify/functions/resolve.mjs   the proxy that holds the key
+```
+
+## The two-tier answer
+
+**The library is the fast path and it must stay precise.** Keyword scoring and unit matching,
+in the browser, instant and free. **Only a miss goes to the web**, where Grok searches and
+returns a distribution.
+
+The rule that keeps this honest: **the model never returns a percentile.** It returns anchor
+points on a cumulative distribution plus the pages it read. Our own maths turns that into a
+score, exactly as it does for the hand-sourced metrics. The model supplies the shape of the
+data, never the answer.
+
+Everything it sends is validated in `netlify/functions/resolve.mjs` before it reaches the
+browser, and **one bad anchor rejects the whole payload** rather than being quietly dropped.
+Answering from the two points that happened to survive is how a wrong answer gets a confident
+face. AI answers are always stamped `estimated`, whatever the model claims about its own
+rigour, because nobody on our side checked the table.
+
+**Do not let a units-only match answer when several metrics could claim the number.**
+"5 hours a week" fits a half marathon, sleep, screen time and exercise. Guessing produced
+"I practice guitar 5 hours a week" → "Running a half marathon in 5:00:00", which is exactly
+the failure the web fallback exists to remove. `parse()` enforces this; there are regression
+tests for it, and they stay.
+
+Widen the local keyword list when a *common* question misses. Do not widen it with generic
+words like `play` or `practice`, which belong to guitar and chess as much as to sport.
 
 ## Design
 
@@ -67,8 +93,16 @@ Read `Jarvis/.claude/design/DESIGN.md` first. This project's own tokens, which o
 ```bash
 npm run dev      # vite
 npm run test     # parser + maths checks, run this before every commit
+npm run test:ai  # the guard rails on the AI payload
 npm run build    # -> docs/, which is what GitHub Pages serves
+
+# exercise the web path with no key and no bill:
+node scripts/stub-resolver.mjs &
+VITE_RESOLVER="http://localhost:8788" npm run build && npm run preview
 ```
+
+The key lives only in the Netlify env as `XAI_API_KEY`, never in the repo and never in the
+bundle. `XAI_MODEL` overrides the model, default `grok-4.5`.
 
 `npm run test` checks that twenty real sentences parse to the right metric and value, that
 every metric parses its own examples, and that no distribution is non-monotonic. Add a case to
